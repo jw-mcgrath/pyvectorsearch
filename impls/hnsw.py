@@ -1,8 +1,8 @@
 from __future__ import annotations
 from enum import Enum
-from typing import Callable, Dict, List, Tuple
+from typing import Callable, Dict, List
 from dataclasses import dataclass, field
-from heapq import heapify, heappush, heappop
+from heapq import heappush, heappop
 
 import numpy as np
 
@@ -88,7 +88,7 @@ class Node:
 
 @dataclass
 class HNSWGraphConfig:
-    M: int  # otherwise known as M
+    M: int
     k_construction: int  # efConstruction
     k_search: int  # efSearch
 
