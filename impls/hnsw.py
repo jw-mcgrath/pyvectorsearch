@@ -151,8 +151,8 @@ class HNSWGraph:
         max_layer = self.entrypoint.get_top_layer()
         for layer_idx in range(max_layer, 0, -1):
             ep = self._search_layer(query, ep, layer_idx, self.config.k_search)[:1]
-        candidates = self._search_layer(query, ep, 0, k)
-        return candidates
+        candidates = self._search_layer(query, ep, 0, self.config.k_search)
+        return candidates[:k]
 
     def _sample_insert_layer(self) -> int:
         return np.floor(

@@ -102,7 +102,7 @@ def compute_recall(approximate_results, exact_results):
 
 
 def test_hnsw():
-    data = generate_unit_sphere_vectors(50, 128)
+    data = generate_unit_sphere_vectors(1000, 128)
     index = setup_faiss_hnsw(data)
     queries = generate_unit_sphere_vectors(100, 128)
     approximate_neighbors = faiss_hnsw_search(index, queries[0, :])
@@ -112,10 +112,8 @@ def test_hnsw():
     graph = setup_custom_hnsw(data)
     approximate_neighbors = [node.id for node in graph.search(queries[0, :], 10)]
     recall = compute_recall(approximate_neighbors, actual_neighbors)
-    print(recall)
-    assert recall > 0.7
-    
-    
+    assert recall > 0.7    
+
 
 
 if __name__ == "__main__":
