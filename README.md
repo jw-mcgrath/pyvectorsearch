@@ -1,2 +1,3 @@
-# pyvectorsearch
-Pythonic and non-optimized versions of vector indices for educational purposes
+# PyVectorSearch
+
+A repo for vector search index research

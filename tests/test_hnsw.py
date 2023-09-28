@@ -1,6 +1,6 @@
 import numpy as np
 import faiss
-from impls.hnsw import HNSWGraphConfig, HNSWGraph, Node
+from impls.edu.hnsw import HNSWGraphConfig, HNSWGraph
 
 
 def generate_unit_sphere_vectors(num_points, dimension):
@@ -108,11 +108,11 @@ def test_hnsw():
     approximate_neighbors = faiss_hnsw_search(index, queries[0, :])
     actual_neighbors = brute_force_search(queries[0, :], data)
     recall = compute_recall(approximate_neighbors, actual_neighbors)
-    assert recall > 0.9
+    assert recall >= 0.9
     graph = setup_custom_hnsw(data)
     approximate_neighbors = [node.id for node in graph.search(queries[0, :], 10)]
     recall = compute_recall(approximate_neighbors, actual_neighbors)
-    assert recall > 0.7    
+    assert recall >= 0.9    
 
 
 
