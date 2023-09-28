@@ -112,7 +112,7 @@ def test_hnsw():
     graph = setup_custom_hnsw(data)
     approximate_neighbors = [node.id for node in graph.search(queries[0, :], 10)]
     recall = compute_recall(approximate_neighbors, actual_neighbors)
-    assert recall >= 0.9    
+    assert recall >= 0.9
 
 
 
