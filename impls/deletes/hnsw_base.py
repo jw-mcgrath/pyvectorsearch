@@ -1,10 +1,20 @@
 from __future__ import annotations
 from enum import Enum
-from typing import Callable, Dict, List
+from typing import Callable, Dict, List, Tuple
 from dataclasses import dataclass, field
 from heapq import heappush, heappop
 
 import numpy as np
+
+
+def batch_apply_distance(
+    distance_func: Callable, query: np.ndarray, candidates: List[Node]
+) -> List[Tuple[Node, float]]:
+    if len(candidates) == 0:
+        return []
+    matrix = np.stack([node.vec for node in candidates])
+    distances = distance_func(query, matrix).tolist()
+    return [(node, distance) for node, distance in zip(candidates, distances)]
 
 
 @dataclass
@@ -13,13 +23,14 @@ class HeapItem:
     node: Node = field(compare=False)
 
     @classmethod
-    def from_node_query(
+    def from_nodes_query(
         cls,
-        node: Node,
+        nodes: List[Node],
         query: np.ndarray,
         distance_func: Callable,
-    ):
-        return cls(distance_func(node.vec, query), node)
+    ) -> List[HeapItem]:
+        nodes_distance_tuples = batch_apply_distance(distance_func, query, nodes)
+        return [cls(distance, node) for node, distance in nodes_distance_tuples]
 
     def __repr__(self) -> str:
         return f"({self.distance}, {self.node.id})"
@@ -74,10 +85,13 @@ class Node:
         if len(self.neighbors[layer]) <= max_connections:
             return
         else:
-            self.neighbors[layer] = sorted(
-                self.neighbors[layer],
-                key=lambda node: distance_func(node.vec, self.vec),
+            candidates = self.neighbors[layer]
+            distances = batch_apply_distance(distance_func, self.vec, candidates)
+            best = sorted(
+                distances,
+                key=lambda node: node[1],
             )[:max_connections]
+            self.neighbors[layer] = [node for node, _ in best]
 
     def get_top_layer(self) -> int:
         return max(self.neighbors.keys())
@@ -111,6 +125,10 @@ class HNSWGraph:
         self.config = config
         self.entrypoint: Node = None
         self.distance_func = distance_func
+        self.nodes: Dict[int, Node] = dict()
+
+    def get(self, id: int) -> Node:
+        return self.nodes[id]
 
     def insert(self, id: int, vec: np.ndarray) -> None:
         links_added = 0
@@ -145,6 +163,7 @@ class HNSWGraph:
             ep = candidates
         if max_layer < insert_layer:
             self.entrypoint = node
+        self.nodes[id] = node
 
     def search(self, query: np.ndarray, k: int) -> List[Node]:
         ep = [self.entrypoint]
@@ -165,8 +184,8 @@ class HNSWGraph:
         visited = set(ep)
         candidates = DistanceHeap(HeapType.MIN)
         best_k = DistanceHeap(HeapType.MAX)
-        for node in ep:
-            item = HeapItem.from_node_query(node, query, self.distance_func)
+        heap_items = HeapItem.from_nodes_query(ep, query, self.distance_func)
+        for item in heap_items:
             candidates.insert(item)
             best_k.insert(item)
         while len(candidates) > 0:
@@ -175,20 +194,21 @@ class HNSWGraph:
             if cand.distance > current_worst.distance:
                 # this is a greedy search, we're done
                 break
-            for neighbor in cand.node.neighbors[layer]:
-                if neighbor not in visited:
-                    visited.add(neighbor)
-                    provisional = HeapItem.from_node_query(
-                        neighbor, query, self.distance_func
-                    )
-                    if (
-                        current_worst.distance >= provisional.distance
-                        or len(best_k) < k
-                    ):
-                        candidates.insert(provisional)
-                        best_k.insert(provisional)
-                        if len(best_k) > k:
-                            best_k.pop()
+            neighbors = set(cand.node.neighbors[layer])
+            to_visit = neighbors.difference(visited)
+            to_visit_heap_items = HeapItem.from_nodes_query(
+                list(to_visit), query, self.distance_func
+            )
+            for provisional in to_visit_heap_items:
+                visited.add(provisional.node)
+                if (
+                    current_worst.distance >= provisional.distance
+                    or len(best_k) < k
+                ):
+                    candidates.insert(provisional)
+                    best_k.insert(provisional)
+                    if len(best_k) > k:
+                        best_k.pop()
         return best_k.get_data()
 
     def _select_neighbors(
@@ -196,6 +216,9 @@ class HNSWGraph:
     ) -> List[Node]:
         # sort the candidates by dot product similarity
         # return the top k
-        return sorted(candidates, key=lambda node: self.distance_func(node.vec, query))[
-            :k
-        ]
+        distances = batch_apply_distance(self.distance_func, query, candidates)
+        best = sorted(
+            distances,
+            key=lambda node: node[1],
+        )[:k]
+        return [node for node, _ in best]
