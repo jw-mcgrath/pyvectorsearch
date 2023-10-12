@@ -4,15 +4,15 @@ from typing import Callable, Dict, List, Tuple
 from dataclasses import dataclass, field
 from heapq import heappush, heappop
 
-import numpy as np
+import torch
 
 
 def batch_apply_distance(
-    distance_func: Callable, query: np.ndarray, candidates: List[Node]
+    distance_func: Callable, query: torch.Tensor, candidates: List[Node]
 ) -> List[Tuple[Node, float]]:
     if len(candidates) == 0:
         return []
-    matrix = np.stack([node.vec for node in candidates])
+    matrix = torch.stack([node.vec for node in candidates])
     distances = distance_func(query, matrix).tolist()
     return [(node, distance) for node, distance in zip(candidates, distances)]
 
@@ -26,7 +26,7 @@ class HeapItem:
     def from_nodes_query(
         cls,
         nodes: List[Node],
-        query: np.ndarray,
+        query: torch.Tensor,
         distance_func: Callable,
     ) -> List[HeapItem]:
         nodes_distance_tuples = batch_apply_distance(distance_func, query, nodes)
@@ -72,11 +72,12 @@ class DistanceHeap:
 @dataclass
 class Node:
     id: int
-    vec: np.ndarray
+    vec: torch.Tensor
     neighbors: Dict[int, List[Node]]
+    
 
     @staticmethod
-    def from_vec(id: int, vec: np.ndarray, nlayers: int) -> Node:
+    def from_vec(id: int, vec: torch.Tensor, nlayers: int) -> Node:
         return Node(id, vec, {layer: [] for layer in range(nlayers, -1, -1)})
 
     def shrink_connections(
@@ -108,7 +109,7 @@ class HNSWGraphConfig:
 
     @property
     def layer_multiplier(self) -> int:
-        val = 1 / np.log(self.M)
+        val = 1 / torch.log(torch.Tensor([self.M]))
         return val
 
     @property
@@ -130,7 +131,7 @@ class HNSWGraph:
     def get(self, id: int) -> Node:
         return self.nodes[id]
 
-    def insert(self, id: int, vec: np.ndarray) -> None:
+    def insert(self, id: int, vec: torch.Tensor) -> None:
         links_added = 0
         insert_layer = self._sample_insert_layer()
         if self.entrypoint is None:
@@ -165,7 +166,7 @@ class HNSWGraph:
             self.entrypoint = node
         self.nodes[id] = node
 
-    def search(self, query: np.ndarray, k: int) -> List[Node]:
+    def search(self, query: torch.Tensor, k: int) -> List[Node]:
         ep = [self.entrypoint]
         max_layer = self.entrypoint.get_top_layer()
         for layer_idx in range(max_layer, 0, -1):
@@ -174,12 +175,12 @@ class HNSWGraph:
         return candidates[:k]
 
     def _sample_insert_layer(self) -> int:
-        return np.floor(
-            -self.config.layer_multiplier * np.log(np.random.uniform(0, 1))
-        ).astype(int)
+        return int(torch.floor(
+            -self.config.layer_multiplier * torch.log(torch.rand(1))
+        ).item())
 
     def _search_layer(
-        self, query: np.ndarray, ep: List[Node], layer: int, k: int
+        self, query: torch.Tensor, ep: List[Node], layer: int, k: int
     ) -> List[Node]:
         visited = set(ep)
         candidates = DistanceHeap(HeapType.MIN)
@@ -201,10 +202,7 @@ class HNSWGraph:
             )
             for provisional in to_visit_heap_items:
                 visited.add(provisional.node)
-                if (
-                    current_worst.distance >= provisional.distance
-                    or len(best_k) < k
-                ):
+                if current_worst.distance >= provisional.distance or len(best_k) < k:
                     candidates.insert(provisional)
                     best_k.insert(provisional)
                     if len(best_k) > k:
@@ -212,7 +210,7 @@ class HNSWGraph:
         return best_k.get_data()
 
     def _select_neighbors(
-        self, query: np.ndarray, candidates: List[Node], k: int
+        self, query: torch.Tensor, candidates: List[Node], k: int
     ) -> List[Node]:
         # sort the candidates by dot product similarity
         # return the top k

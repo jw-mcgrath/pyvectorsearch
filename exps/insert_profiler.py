@@ -1,5 +1,6 @@
 from impls.deletes.hnsw_base import HNSWGraphConfig, HNSWGraph
 import numpy as np
+import torch
 import cProfile
 
 
@@ -17,12 +18,12 @@ def generate_unit_sphere_vectors(num_points, dimension):
     vectors = np.random.randn(num_points, dimension)
     norms = np.linalg.norm(vectors, axis=1, keepdims=True)
     normalized_vectors = vectors / norms
-    return normalized_vectors
+    return torch.from_numpy(normalized_vectors)
 
 
 def setup_custom_hnsw(data, M=30, efConstruction=100, efSearch=50):
     def distance_func(query, candidates):
-        return np.linalg.norm(query - candidates, axis=1)
+        return torch.linalg.norm(query - candidates, dim=1)
 
     config = HNSWGraphConfig(k_construction=efConstruction, M=M, k_search=efSearch)
     graph = HNSWGraph(config, distance_func=distance_func)
