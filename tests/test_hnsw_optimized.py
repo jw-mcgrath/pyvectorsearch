@@ -1,7 +1,7 @@
 import numpy as np
 import torch
 import faiss
-from impls.deletes.hnsw_base import (
+from impls.optimized.hnsw_base import (
     HNSWGraphConfig,
     HNSWGraph,
     batch_apply_distance,
@@ -107,7 +107,7 @@ def compute_recall(approximate_results, exact_results):
 
 
 def test_hnsw():
-    data = generate_unit_sphere_vectors(100, 128)
+    data = generate_unit_sphere_vectors(1000, 128)
     index = setup_faiss_hnsw(data)
     queries = generate_unit_sphere_vectors(100, 128)
     approximate_neighbors = faiss_hnsw_search(index, queries[0, :])
@@ -115,7 +115,9 @@ def test_hnsw():
     recall = compute_recall(approximate_neighbors, actual_neighbors)
     assert recall >= 0.9
     graph = setup_custom_hnsw(data)
-    approximate_neighbors = [node.id for node in graph.search(torch.from_numpy(queries[0, :]), 10)]
+    approximate_neighbors = [
+        node.id for node in graph.search(torch.from_numpy(queries[0, :]), 10)
+    ]
     recall = compute_recall(approximate_neighbors, actual_neighbors)
     assert recall >= 0.9
 
@@ -132,3 +134,31 @@ def test_batch_apply():
     scores = batch_apply_distance(distance_func, query, nodes)
     assert len(scores) == 1000
     assert all([isinstance(score, tuple) for score in scores])
+
+
+def test_node_linear_algebra():
+    data = generate_unit_sphere_vectors(3, 128)
+    data = torch.from_numpy(data)
+    node = Node.from_vec(0, data[0, :], 0)
+    assert node.neighbors == {0: []}
+    assert node.neighbor_mats == {0: None}
+    node_1 = Node.from_vec(1, data[1, :], 0)
+    node.add_neighbor(node_1, 0)
+    assert node.neighbors == {0: [node_1]}
+    assert node.neighbor_mats[0].shape == (1, 128)
+    node_2 = Node.from_vec(2, data[2, :], 0)
+    node.add_neighbor(node_2, 0)
+    assert node.neighbors == {0: [node_1, node_2]}
+    assert node.neighbor_mats[0].shape == (2, 128)
+    distances_nodes = node.materialize_distances(
+        0, set(), data[1, :], lambda x, y: torch.linalg.norm(x - y, dim=1)
+    )
+    assert len(distances_nodes) == 2
+    assert distances_nodes[0][1]== node_1
+    assert distances_nodes[1][1] == node_2
+    assert distances_nodes[0][0] < distances_nodes[1][0]
+    distances_nodes = node.materialize_distances(0, set([node_1]), data[1, :], lambda x,y : torch.linalg.norm(x - y, dim=1))
+    assert len(distances_nodes) == 1
+    node.shrink_connections(0, 1, lambda x, y: torch.linalg.norm(x - y, dim=1))
+    assert len(node.neighbors[0]) == 1
+    assert node.neighbor_mats[0].shape == (1, 128)

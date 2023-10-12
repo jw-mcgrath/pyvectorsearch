@@ -1,104 +1,13 @@
 from __future__ import annotations
 from enum import Enum
-from typing import Callable, Dict, List, Tuple
+from typing import Callable, Dict, List, Set, Tuple
 from dataclasses import dataclass, field
-from heapq import heappush, heappop
 
 import torch
+from impls.optimized.heap import HeapItem, HeapType, DistanceHeap
 
-
-def batch_apply_distance(
-    distance_func: Callable, query: torch.Tensor, candidates: List[Node]
-) -> List[Tuple[Node, float]]:
-    if len(candidates) == 0:
-        return []
-    matrix = torch.stack([node.vec for node in candidates])
-    distances = distance_func(query, matrix).tolist()
-    return [(node, distance) for node, distance in zip(candidates, distances)]
-
-
-@dataclass
-class HeapItem:
-    distance: float = field(compare=False)
-    node: Node = field(compare=False)
-
-    @classmethod
-    def from_nodes_query(
-        cls,
-        nodes: List[Node],
-        query: torch.Tensor,
-        distance_func: Callable,
-    ) -> List[HeapItem]:
-        nodes_distance_tuples = batch_apply_distance(distance_func, query, nodes)
-        return [cls(distance, node) for node, distance in nodes_distance_tuples]
-
-    def __repr__(self) -> str:
-        return f"({self.distance}, {self.node.id})"
-
-
-class HeapType(Enum):
-    MIN = 1
-    MAX = 2
-
-
-class DistanceHeap:
-    def __init__(self, htype: HeapType) -> None:
-        self.htype = htype
-        self.data = []
-
-    def insert(self, item: HeapItem) -> None:
-        if self.htype == HeapType.MIN:
-            heappush(self.data, (item.distance, item))
-        else:
-            heappush(self.data, (-item.distance, item))
-
-    def peek(self) -> HeapItem:
-        _, node = self.data[0]
-        return node
-
-    def pop(self) -> HeapItem:
-        _, node = heappop(self.data)
-        return node
-
-    def __len__(self) -> int:
-        return len(self.data)
-
-    def get_data(self) -> List[Node]:
-        items = [item for _, item in self.data]
-        sorted_items = sorted(items, key=lambda item: item.distance)
-        return list(map(lambda item: item.node, sorted_items))
-
-
-@dataclass
-class Node:
-    id: int
-    vec: torch.Tensor
-    neighbors: Dict[int, List[Node]]
-    
-
-    @staticmethod
-    def from_vec(id: int, vec: torch.Tensor, nlayers: int) -> Node:
-        return Node(id, vec, {layer: [] for layer in range(nlayers, -1, -1)})
-
-    def shrink_connections(
-        self, layer: int, max_connections: int, distance_func: Callable
-    ) -> None:
-        if len(self.neighbors[layer]) <= max_connections:
-            return
-        else:
-            candidates = self.neighbors[layer]
-            distances = batch_apply_distance(distance_func, self.vec, candidates)
-            best = sorted(
-                distances,
-                key=lambda node: node[1],
-            )[:max_connections]
-            self.neighbors[layer] = [node for node, _ in best]
-
-    def get_top_layer(self) -> int:
-        return max(self.neighbors.keys())
-
-    def __hash__(self) -> int:
-        return hash(self.id)
+from impls.optimized.node import Node
+from impls.optimized.utils import batch_apply_distance, distances_to_heap_items, nodes_to_heap_items
 
 
 @dataclass
@@ -156,11 +65,12 @@ class HNSWGraph:
             neighbors = self._select_neighbors(node.vec, candidates, self.config.M)
             for neighbor in neighbors:
                 links_added += 2
-                neighbor.neighbors[layer_idx].append(node)
-                node.neighbors[layer_idx].append(neighbor)
+                neighbor.add_neighbor(node, layer_idx)
+                node.add_neighbor(neighbor, layer_idx)
                 neighbor.shrink_connections(
                     layer_idx, self.config.neighbor_max_degree, self.distance_func
                 )
+            node.shrink_connections(layer_idx, self.config.neighbor_max_degree, self.distance_func)
             ep = candidates
         if max_layer < insert_layer:
             self.entrypoint = node
@@ -175,9 +85,9 @@ class HNSWGraph:
         return candidates[:k]
 
     def _sample_insert_layer(self) -> int:
-        return int(torch.floor(
-            -self.config.layer_multiplier * torch.log(torch.rand(1))
-        ).item())
+        return int(
+            torch.floor(-self.config.layer_multiplier * torch.log(torch.rand(1))).item()
+        )
 
     def _search_layer(
         self, query: torch.Tensor, ep: List[Node], layer: int, k: int
@@ -185,7 +95,7 @@ class HNSWGraph:
         visited = set(ep)
         candidates = DistanceHeap(HeapType.MIN)
         best_k = DistanceHeap(HeapType.MAX)
-        heap_items = HeapItem.from_nodes_query(ep, query, self.distance_func)
+        heap_items = nodes_to_heap_items(ep, query, self.distance_func)
         for item in heap_items:
             candidates.insert(item)
             best_k.insert(item)
@@ -195,11 +105,10 @@ class HNSWGraph:
             if cand.distance > current_worst.distance:
                 # this is a greedy search, we're done
                 break
-            neighbors = set(cand.node.neighbors[layer])
-            to_visit = neighbors.difference(visited)
-            to_visit_heap_items = HeapItem.from_nodes_query(
-                list(to_visit), query, self.distance_func
+            materialized_distances = cand.node.materialize_distances(
+                layer, visited, query, self.distance_func
             )
+            to_visit_heap_items = distances_to_heap_items(materialized_distances)
             for provisional in to_visit_heap_items:
                 visited.add(provisional.node)
                 if current_worst.distance >= provisional.distance or len(best_k) < k:

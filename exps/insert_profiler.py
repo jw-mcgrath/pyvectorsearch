@@ -21,7 +21,7 @@ def generate_unit_sphere_vectors(num_points, dimension):
     return torch.from_numpy(normalized_vectors)
 
 
-def setup_custom_hnsw(data, M=30, efConstruction=100, efSearch=50):
+def setup_custom_hnsw(data, M=30, efConstruction=100, efSearch=10):
     def distance_func(query, candidates):
         return torch.linalg.norm(query - candidates, dim=1)
 
@@ -33,7 +33,7 @@ def setup_custom_hnsw(data, M=30, efConstruction=100, efSearch=50):
 
 
 def profile():
-    data = generate_unit_sphere_vectors(10000, 128)
+    data = generate_unit_sphere_vectors(1000, 128)
     with cProfile.Profile() as pr:
         setup_custom_hnsw(data)
     pr.dump_stats("exps/output_data/insert_profiler.prof")
