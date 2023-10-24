@@ -66,9 +66,12 @@ class Node:
 
     def shrink_connections(
         self, layer: int, max_connections: int, distance_func: Callable
-    ) -> None:
+    ) -> bool:
+        """
+        returns false if links were not shrunk, true otherwise
+        """
         if len(self.neighbors[layer]) <= max_connections:
-            return
+            return False
         else:
             candidates = self.neighbors[layer]
             distances = distance_func(self.vec, self.neighbor_mats[layer])
@@ -83,6 +86,7 @@ class Node:
             self.neighbor_mats[layer] = torch.cat(
                 [node.vec.reshape(1, -1) for node, _ in best]
             )
+            return True
 
     def get_top_layer(self) -> int:
         return max(self.neighbors.keys())

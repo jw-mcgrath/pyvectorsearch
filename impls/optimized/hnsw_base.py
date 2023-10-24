@@ -7,6 +7,7 @@ import torch
 from impls.optimized.heap import HeapItem, HeapType, DistanceHeap
 
 from impls.optimized.node import Node
+from impls.optimized.op_stats import OperationStats
 from impls.optimized.utils import batch_apply_distance, distances_to_heap_items, nodes_to_heap_items
 
 
@@ -36,18 +37,20 @@ class HNSWGraph:
         self.entrypoint: Node = None
         self.distance_func = distance_func
         self.nodes: Dict[int, Node] = dict()
+        self.op_stats: OperationStats = OperationStats()
+
 
     def get(self, id: int) -> Node:
         return self.nodes[id]
 
-    def insert(self, id: int, vec: torch.Tensor) -> None:
+    def insert(self, id: int, vec: torch.Tensor) -> OperationStats:
+        self._reset_op_stats()
         links_added = 0
         insert_layer = self._sample_insert_layer()
         if self.entrypoint is None:
             node = Node.from_vec(id, vec, insert_layer)
             self.entrypoint = node
-            return
-
+            return self.op_stats
         node = Node.from_vec(id, vec, insert_layer)
         ep = [self.entrypoint]
         max_layer = self.entrypoint.get_top_layer()
@@ -67,22 +70,25 @@ class HNSWGraph:
                 links_added += 2
                 neighbor.add_neighbor(node, layer_idx)
                 node.add_neighbor(neighbor, layer_idx)
-                neighbor.shrink_connections(
+                shrink_computed = neighbor.shrink_connections(
                     layer_idx, self.config.neighbor_max_degree, self.distance_func
                 )
-            node.shrink_connections(layer_idx, self.config.neighbor_max_degree, self.distance_func)
+                if shrink_computed:
+                    self.op_stats.shrinks_distance_computations += len(neighbor.neighbors[layer_idx]) + 1
             ep = candidates
         if max_layer < insert_layer:
             self.entrypoint = node
         self.nodes[id] = node
+        return self.op_stats
 
-    def search(self, query: torch.Tensor, k: int) -> List[Node]:
+    def search(self, query: torch.Tensor, k: int) -> Tuple[List[Node], OperationStats]:
+        self._reset_op_stats()
         ep = [self.entrypoint]
         max_layer = self.entrypoint.get_top_layer()
         for layer_idx in range(max_layer, 0, -1):
             ep = self._search_layer(query, ep, layer_idx, self.config.k_search)[:1]
         candidates = self._search_layer(query, ep, 0, self.config.k_search)
-        return candidates[:k]
+        return candidates[:k], self.op_stats
 
     def _sample_insert_layer(self) -> int:
         return int(
@@ -92,6 +98,7 @@ class HNSWGraph:
     def _search_layer(
         self, query: torch.Tensor, ep: List[Node], layer: int, k: int
     ) -> List[Node]:
+
         visited = set(ep)
         candidates = DistanceHeap(HeapType.MIN)
         best_k = DistanceHeap(HeapType.MAX)
@@ -100,6 +107,7 @@ class HNSWGraph:
             candidates.insert(item)
             best_k.insert(item)
         while len(candidates) > 0:
+            self.op_stats.visited += 1
             cand = candidates.pop()
             current_worst = best_k.peek()
             if cand.distance > current_worst.distance:
@@ -108,6 +116,7 @@ class HNSWGraph:
             materialized_distances = cand.node.materialize_distances(
                 layer, visited, query, self.distance_func
             )
+            self.op_stats.search_distance_computations += len(materialized_distances)
             to_visit_heap_items = distances_to_heap_items(materialized_distances)
             for provisional in to_visit_heap_items:
                 visited.add(provisional.node)
@@ -129,3 +138,6 @@ class HNSWGraph:
             key=lambda node: node[1],
         )[:k]
         return [node for node, _ in best]
+    
+    def _reset_op_stats(self) -> None:
+        self.op_stats = OperationStats()
