@@ -196,4 +196,6 @@ class HNSWGraph:
     ) -> List[Node]:
         # sort the candidates by dot product similarity
         # return the top k
-        return sorted(candidates, key=lambda node: node.vec.dot(query))[:k]
+        return sorted(candidates, key=lambda node: self.distance_func(node.vec, query))[
+            :k
+        ]
