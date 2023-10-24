@@ -141,3 +141,4 @@ class HNSWGraph:
     
     def _reset_op_stats(self) -> None:
         self.op_stats = OperationStats()
+        self.op_stats.size = len(self.nodes)

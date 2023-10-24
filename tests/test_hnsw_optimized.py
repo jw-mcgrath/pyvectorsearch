@@ -116,7 +116,7 @@ def test_hnsw():
     assert recall >= 0.9
     graph = setup_custom_hnsw(data)
     approximate_neighbors = [
-        node.id for node in graph.search(torch.from_numpy(queries[0, :]), 10)
+        node.id for node in graph.search(torch.from_numpy(queries[0, :]), 10)[0]
     ]
     recall = compute_recall(approximate_neighbors, actual_neighbors)
     assert recall >= 0.9
