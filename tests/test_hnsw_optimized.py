@@ -7,6 +7,12 @@ from impls.optimized.hnsw_base_collated import (
     batch_apply_distance,
     Node,
 )
+from impls.optimized.hnsw_base_non_collated import (
+    HNSWGraph as HNSWGraphNonCollated,
+    HNSWGraphConfig as HNSWGraphConfigNonCollated,
+    batch_apply_distance as batch_apply_distance_non_collated,
+    Node as NodeNonCollated,
+)
 
 
 def generate_unit_sphere_vectors(num_points, dimension):
@@ -49,11 +55,15 @@ def setup_custom_hnsw(data, M=30, efConstruction=100, efSearch=50):
     def distance_func(query, candidates):
         return torch.linalg.norm(query - candidates, dim=1)
 
-    config = HNSWGraphConfig(k_construction=efConstruction, M=M, k_search=efSearch)
-    graph = HNSWGraph(config, distance_func=distance_func)
+    config_collated = HNSWGraphConfig(k_construction=efConstruction, M=M, k_search=efSearch)
+    config_non_collated = HNSWGraphConfigNonCollated(k_construction=efConstruction, M=M, k_search=efSearch)
+    graph_collated = HNSWGraph(config_collated, distance_func=distance_func)
+    graph_non_collated = HNSWGraphNonCollated(config_non_collated, distance_func=distance_func)
     for i, vec in enumerate(torch.from_numpy(data)):
-        graph.insert(i, vec)
-    return graph
+        graph_collated.insert(i, vec)
+        graph_non_collated.insert(i, vec)
+
+    return graph_collated, graph_non_collated
 
 
 def faiss_hnsw_search(index, query, k=10, efSearch=50):
@@ -114,12 +124,18 @@ def test_hnsw():
     actual_neighbors = brute_force_search(queries[0, :], data)
     recall = compute_recall(approximate_neighbors, actual_neighbors)
     assert recall >= 0.9
-    graph = setup_custom_hnsw(data)
+    graph_collated, graph_non_collated = setup_custom_hnsw(data)
     approximate_neighbors = [
-        node.id for node in graph.search(torch.from_numpy(queries[0, :]), 10)[0]
+        node.id for node in graph_collated.search(torch.from_numpy(queries[0, :]), 10)[0]
     ]
     recall = compute_recall(approximate_neighbors, actual_neighbors)
     assert recall >= 0.9
+    approximate_neighbors = [
+        node.id for node in graph_non_collated.search(torch.from_numpy(queries[0, :]), 10)
+    ]
+    recall = compute_recall(approximate_neighbors, actual_neighbors)
+    assert recall >= 0.9
+
 
 
 def test_batch_apply():
@@ -154,10 +170,12 @@ def test_node_linear_algebra():
         0, set(), data[1, :], lambda x, y: torch.linalg.norm(x - y, dim=1)
     )
     assert len(distances_nodes) == 2
-    assert distances_nodes[0][1]== node_1
+    assert distances_nodes[0][1] == node_1
     assert distances_nodes[1][1] == node_2
     assert distances_nodes[0][0] < distances_nodes[1][0]
-    distances_nodes = node.materialize_distances(0, set([node_1]), data[1, :], lambda x,y : torch.linalg.norm(x - y, dim=1))
+    distances_nodes = node.materialize_distances(
+        0, set([node_1]), data[1, :], lambda x, y: torch.linalg.norm(x - y, dim=1)
+    )
     assert len(distances_nodes) == 1
     node.shrink_connections(0, 1, lambda x, y: torch.linalg.norm(x - y, dim=1))
     assert len(node.neighbors[0]) == 1
