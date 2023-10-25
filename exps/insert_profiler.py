@@ -1,4 +1,4 @@
-from impls.optimized.hnsw_base import HNSWGraphConfig, HNSWGraph
+from impls.optimized.hnsw_base_collated import HNSWGraphConfig, HNSWGraph
 import numpy as np
 import torch
 import pandas as pd

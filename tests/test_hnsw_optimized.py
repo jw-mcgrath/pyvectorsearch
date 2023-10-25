@@ -1,7 +1,7 @@
 import numpy as np
 import torch
 import faiss
-from impls.optimized.hnsw_base import (
+from impls.optimized.hnsw_base_collated import (
     HNSWGraphConfig,
     HNSWGraph,
     batch_apply_distance,
