@@ -1,29 +1,11 @@
 import numpy as np
 import torch
 import faiss
-from impls.optimized.hnsw_base import (
-    HNSWGraphConfig,
-    HNSWGraph,
-    batch_apply_distance,
-    Node,
-)
 
-
-def generate_unit_sphere_vectors(num_points, dimension):
-    """
-    Generate uniformly distributed vectors on the unit sphere in M dimensions.
-
-    Args:
-    - num_points (int): Number of vectors to generate.
-    - dimension (int): Dimensionality of each vector.
-
-    Returns:
-    - vectors (np.array): Generated vectors of shape (num_points, dimension), normalized on the unit sphere.
-    """
-    vectors = np.random.randn(num_points, dimension)
-    norms = np.linalg.norm(vectors, axis=1, keepdims=True)
-    normalized_vectors = vectors / norms
-    return normalized_vectors
+from impls.optimized.hnsw_base import HNSWGraph, HNSWGraphConfig
+from impls.optimized.node import Node
+from impls.optimized.utils import batch_apply_distance
+from tests.test_utils import generate_unit_sphere_vectors
 
 
 def setup_faiss_hnsw(data, M=30, efConstruction=100):
@@ -50,9 +32,12 @@ def setup_custom_hnsw(data, M=30, efConstruction=100, efSearch=50):
         return torch.linalg.norm(query - candidates, dim=1)
 
     config = HNSWGraphConfig(k_construction=efConstruction, M=M, k_search=efSearch)
+
     graph = HNSWGraph(config, distance_func=distance_func)
+
     for i, vec in enumerate(torch.from_numpy(data)):
         graph.insert(i, vec)
+
     return graph
 
 
@@ -70,7 +55,7 @@ def faiss_hnsw_search(index, query, k=10, efSearch=50):
     - indices (np.array): Indices of the k nearest neighbors in the dataset.
     """
     index.hnsw.efSearch = efSearch
-    vecs, neighbors = index.search(np.expand_dims(query, 0), k)
+    _, neighbors = index.search(np.expand_dims(query, 0), k)
     return neighbors.flatten().tolist()
 
 
@@ -116,7 +101,7 @@ def test_hnsw():
     assert recall >= 0.9
     graph = setup_custom_hnsw(data)
     approximate_neighbors = [
-        node.id for node in graph.search(torch.from_numpy(queries[0, :]), 10)
+        node.id for node in graph.search(torch.from_numpy(queries[0, :]), 10)[0]
     ]
     recall = compute_recall(approximate_neighbors, actual_neighbors)
     assert recall >= 0.9
@@ -134,31 +119,3 @@ def test_batch_apply():
     scores = batch_apply_distance(distance_func, query, nodes)
     assert len(scores) == 1000
     assert all([isinstance(score, tuple) for score in scores])
-
-
-def test_node_linear_algebra():
-    data = generate_unit_sphere_vectors(3, 128)
-    data = torch.from_numpy(data)
-    node = Node.from_vec(0, data[0, :], 0)
-    assert node.neighbors == {0: []}
-    assert node.neighbor_mats == {0: None}
-    node_1 = Node.from_vec(1, data[1, :], 0)
-    node.add_neighbor(node_1, 0)
-    assert node.neighbors == {0: [node_1]}
-    assert node.neighbor_mats[0].shape == (1, 128)
-    node_2 = Node.from_vec(2, data[2, :], 0)
-    node.add_neighbor(node_2, 0)
-    assert node.neighbors == {0: [node_1, node_2]}
-    assert node.neighbor_mats[0].shape == (2, 128)
-    distances_nodes = node.materialize_distances(
-        0, set(), data[1, :], lambda x, y: torch.linalg.norm(x - y, dim=1)
-    )
-    assert len(distances_nodes) == 2
-    assert distances_nodes[0][1]== node_1
-    assert distances_nodes[1][1] == node_2
-    assert distances_nodes[0][0] < distances_nodes[1][0]
-    distances_nodes = node.materialize_distances(0, set([node_1]), data[1, :], lambda x,y : torch.linalg.norm(x - y, dim=1))
-    assert len(distances_nodes) == 1
-    node.shrink_connections(0, 1, lambda x, y: torch.linalg.norm(x - y, dim=1))
-    assert len(node.neighbors[0]) == 1
-    assert node.neighbor_mats[0].shape == (1, 128)
