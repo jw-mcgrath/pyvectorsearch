@@ -43,13 +43,14 @@ class HNSWGraph:
 
     def insert(self, id: int, vec: torch.Tensor) -> OperationStats:
         self._reset_op_stats()
+
         insert_layer = self._sample_insert_layer()
+        node = Node.from_vec(id, vec, insert_layer)
+        self.nodes[id] = node
         if self.entrypoint is None:
-            node = Node.from_vec(id, vec, insert_layer)
             self.entrypoint = node
             return self.op_stats
 
-        node = Node.from_vec(id, vec, insert_layer)
         ep = [self.entrypoint]
         max_layer = self.entrypoint.get_top_layer()
         # first we search down to the first layer where we'll insert the noe
@@ -75,7 +76,6 @@ class HNSWGraph:
             ep = candidates
         if max_layer < insert_layer:
             self.entrypoint = node
-        self.nodes[id] = node
         return self.op_stats
 
     def search(self, query: torch.Tensor, k: int) -> Tuple[List[Node], OperationStats]:

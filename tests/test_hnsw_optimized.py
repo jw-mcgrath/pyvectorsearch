@@ -5,23 +5,7 @@ import faiss
 from impls.optimized.hnsw_base import HNSWGraph, HNSWGraphConfig
 from impls.optimized.node import Node
 from impls.optimized.utils import batch_apply_distance
-
-
-def generate_unit_sphere_vectors(num_points, dimension):
-    """
-    Generate uniformly distributed vectors on the unit sphere in M dimensions.
-
-    Args:
-    - num_points (int): Number of vectors to generate.
-    - dimension (int): Dimensionality of each vector.
-
-    Returns:
-    - vectors (np.array): Generated vectors of shape (num_points, dimension), normalized on the unit sphere.
-    """
-    vectors = np.random.randn(num_points, dimension)
-    norms = np.linalg.norm(vectors, axis=1, keepdims=True)
-    normalized_vectors = vectors / norms
-    return normalized_vectors
+from tests.test_utils import generate_unit_sphere_vectors
 
 
 def setup_faiss_hnsw(data, M=30, efConstruction=100):

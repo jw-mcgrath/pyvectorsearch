@@ -1,10 +1,10 @@
-from typing import Any, Callable, List, Tuple
+from typing import Callable, List, Tuple
 import torch
 
 
 def batch_apply_distance(
-    distance_func: Callable, query: torch.Tensor, candidates: List[Any]
-) -> List[Tuple[Any, float]]:
+    distance_func: Callable, query: torch.Tensor, candidates: List["Node"]
+) -> List[Tuple["Node", float]]:
     if len(candidates) == 0:
         return []
     matrix = torch.stack([node.vec for node in candidates])
