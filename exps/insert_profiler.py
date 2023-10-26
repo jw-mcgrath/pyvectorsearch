@@ -1,4 +1,5 @@
-from impls.optimized.hnsw_base_collated import HNSWGraphConfig, HNSWGraph
+import time
+from impls.optimized.hnsw_base import HNSWGraph, HNSWGraphConfig
 import numpy as np
 import torch
 import pandas as pd
@@ -22,7 +23,7 @@ def generate_unit_sphere_vectors(num_points, dimension):
     return torch.from_numpy(normalized_vectors)
 
 
-def setup_custom_hnsw(data, M=30, efConstruction=100, efSearch=10):
+def setup_custom_hnsw(data, M=30, efConstruction=40, efSearch=10):
     def distance_func(query, candidates):
         return torch.linalg.norm(query - candidates, dim=1)
 
@@ -32,28 +33,36 @@ def setup_custom_hnsw(data, M=30, efConstruction=100, efSearch=10):
         graph.insert(i, vec)
     return graph
 
-def profile_custom_hnsw(data, M=30, efConstruction=100, efSearch=10):
+
+def build_empty_custom_hnsw_graphs(M=20, efConstruction=40, efSearch=10):
     def distance_func(query, candidates):
         return torch.linalg.norm(query - candidates, dim=1)
 
     config = HNSWGraphConfig(k_construction=efConstruction, M=M, k_search=efSearch)
     graph = HNSWGraph(config, distance_func=distance_func)
+    return graph
+
+
+def profile_custom_hnsw(graph, data):
     stats = []
     for i, vec in enumerate(data):
         stat = graph.insert(i, vec)
         stats.append(stat)
     return list(map(lambda x: x.to_dict(), stats))
-    
 
 
 def profile():
-    data = generate_unit_sphere_vectors(1000, 128)
+    data = generate_unit_sphere_vectors(5000, 128)
     print("Creating a line profile of the insert...")
     with cProfile.Profile() as pr:
         setup_custom_hnsw(data)
     pr.dump_stats("exps/output_data/insert_profiler.prof")
     print("Generating a dump of insert stats...")
-    stats = profile_custom_hnsw(data)
+    graph = build_empty_custom_hnsw_graphs()
+    start = time.time()
+    stats = profile_custom_hnsw(graph, data)
+    end = time.time()
+    print(f"Collated insert took {end - start} seconds")
     df = pd.DataFrame(stats)
     df.to_csv("exps/output_data/insert_stats.csv")
 

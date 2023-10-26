@@ -1,14 +1,13 @@
 from __future__ import annotations
-from enum import Enum
-from typing import Callable, Dict, List, Set, Tuple
-from dataclasses import dataclass, field
+from typing import Callable, Dict, List, Tuple
+from dataclasses import dataclass
 
 import torch
-from impls.optimized.heap import HeapItem, HeapType, DistanceHeap
-
+from impls.optimized.heap import DistanceHeap, HeapItem, HeapType
 from impls.optimized.node import Node
+
 from impls.optimized.op_stats import OperationStats
-from impls.optimized.utils import batch_apply_distance, distances_to_heap_items, nodes_to_heap_items
+from impls.optimized.utils import batch_apply_distance
 
 
 @dataclass
@@ -39,18 +38,17 @@ class HNSWGraph:
         self.nodes: Dict[int, Node] = dict()
         self.op_stats: OperationStats = OperationStats()
 
-
     def get(self, id: int) -> Node:
         return self.nodes[id]
 
     def insert(self, id: int, vec: torch.Tensor) -> OperationStats:
         self._reset_op_stats()
-        links_added = 0
         insert_layer = self._sample_insert_layer()
         if self.entrypoint is None:
             node = Node.from_vec(id, vec, insert_layer)
             self.entrypoint = node
             return self.op_stats
+
         node = Node.from_vec(id, vec, insert_layer)
         ep = [self.entrypoint]
         max_layer = self.entrypoint.get_top_layer()
@@ -67,13 +65,12 @@ class HNSWGraph:
             )
             neighbors = self._select_neighbors(node.vec, candidates, self.config.M)
             for neighbor in neighbors:
-                links_added += 2
-                neighbor.add_neighbor(node, layer_idx)
-                node.add_neighbor(neighbor, layer_idx)
-                shrink_computed = neighbor.shrink_connections(
+                neighbor.neighbors[layer_idx].append(node)
+                node.neighbors[layer_idx].append(neighbor)
+                shrinks_computed = neighbor.shrink_connections(
                     layer_idx, self.config.neighbor_max_degree, self.distance_func
                 )
-                if shrink_computed:
+                if shrinks_computed:
                     self.op_stats.shrinks_distance_computations += len(neighbor.neighbors[layer_idx]) + 1
             ep = candidates
         if max_layer < insert_layer:
@@ -91,18 +88,18 @@ class HNSWGraph:
         return candidates[:k], self.op_stats
 
     def _sample_insert_layer(self) -> int:
-        return int(
-            torch.floor(-self.config.layer_multiplier * torch.log(torch.rand(1))).item()
-        )
+        return int(torch.floor(
+            -self.config.layer_multiplier * torch.log(torch.rand(1))
+        ).item())
 
     def _search_layer(
         self, query: torch.Tensor, ep: List[Node], layer: int, k: int
     ) -> List[Node]:
-
         visited = set(ep)
         candidates = DistanceHeap(HeapType.MIN)
         best_k = DistanceHeap(HeapType.MAX)
-        heap_items = nodes_to_heap_items(ep, query, self.distance_func)
+        heap_items = HeapItem.from_nodes_query(ep, query, self.distance_func)
+        self.op_stats.search_distance_computations += len(heap_items)
         for item in heap_items:
             candidates.insert(item)
             best_k.insert(item)
@@ -113,11 +110,12 @@ class HNSWGraph:
             if cand.distance > current_worst.distance:
                 # this is a greedy search, we're done
                 break
-            materialized_distances = cand.node.materialize_distances(
-                layer, visited, query, self.distance_func
+            neighbors = set(cand.node.neighbors[layer])
+            to_visit = neighbors.difference(visited)
+            to_visit_heap_items = HeapItem.from_nodes_query(
+                list(to_visit), query, self.distance_func
             )
-            self.op_stats.search_distance_computations += len(materialized_distances)
-            to_visit_heap_items = distances_to_heap_items(materialized_distances)
+            self.op_stats.search_distance_computations += len(to_visit_heap_items)
             for provisional in to_visit_heap_items:
                 visited.add(provisional.node)
                 if current_worst.distance >= provisional.distance or len(best_k) < k:
