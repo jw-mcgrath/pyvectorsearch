@@ -5,7 +5,7 @@ import faiss
 from impls.optimized.hnsw_base import HNSWGraph, HNSWGraphConfig
 from impls.optimized.node import Node
 from impls.optimized.utils import batch_apply_distance
-from tests.test_utils import generate_unit_sphere_vectors
+from tests.test_utils import brute_force_search, compute_recall, generate_unit_sphere_vectors
 
 
 def setup_faiss_hnsw(data, M=30, efConstruction=100):
@@ -59,36 +59,8 @@ def faiss_hnsw_search(index, query, k=10, efSearch=50):
     return neighbors.flatten().tolist()
 
 
-def brute_force_search(query, data, k=10):
-    """
-    Perform a brute force search to find the k nearest neighbors of a query point.
-
-    Args:
-    - query (np.array): The query point of shape (dimension, ).
-    - data (np.array): The dataset of shape (num_points, dimension).
-    - k (int): Number of neighbors to retrieve.
-
-    Returns:
-    - indices (np.array): Indices of the k nearest neighbors in the dataset.
-    """
-    distances = np.linalg.norm(data - query, axis=1)
-    return np.argsort(distances)[:k].flatten().tolist()
 
 
-def compute_recall(approximate_results, exact_results):
-    """
-    Compute the recall between approximate and exact nearest neighbor results.
-
-    Args:
-    - approximate_results (list or np.array): Results from the approximate nearest neighbor search.
-    - exact_results (list or np.array): Results from the exact nearest neighbor search.
-
-    Returns:
-    - recall (float): The fraction of approximate results that match the exact results.
-    """
-    intersection = len(set(approximate_results) & set(exact_results))
-    recall = intersection / len(exact_results)
-    return recall
 
 
 def test_hnsw():

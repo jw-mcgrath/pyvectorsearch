@@ -5,7 +5,6 @@ from impls.optimized.op_stats import OperationStats
 class NaiveDeleteHNSWGraph(HNSWGraph):
     def delete(self, id: int) -> OperationStats:
         self._reset_op_stats()
-        print(list(self.nodes.keys()))
         node_to_delete = self.nodes[id]
         for node in self.nodes.values():
             for layer in node.neighbors.keys():
